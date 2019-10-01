@@ -99,9 +99,6 @@ interface PasteData {
  */
 export default class Paste extends Module {
 
-  /** If string`s length is greater than this number we don't check paste patterns */
-  public static readonly PATTERN_PROCESSING_MAX_LENGTH = 450;
-
   /**
    * Tags` substitutions parameters
    */
@@ -211,9 +208,9 @@ export default class Paste extends Module {
     const isCurrentBlockInitial = BlockManager.currentBlock && Tools.isInitial(BlockManager.currentBlock.tool);
     const needToReplaceCurrentBlock = isCurrentBlockInitial && BlockManager.currentBlock.isEmpty;
 
-    await Promise.all(dataToInsert.map(
-      async (content, i) => await this.insertBlock(content, i === 0 && needToReplaceCurrentBlock),
-    ));
+    for (const [i, content] of dataToInsert.entries()) {
+      await this.insertBlock(content, i === 0 && needToReplaceCurrentBlock);
+    }
 
     if (BlockManager.currentBlock) {
       Caret.setToBlock(BlockManager.currentBlock, Caret.positions.END);
@@ -548,8 +545,6 @@ export default class Paste extends Module {
       return [];
     }
 
-    const tool = initialBlock;
-
     return plain
       .split(/\r?\n/)
       .filter((text) => text.trim())
@@ -558,9 +553,18 @@ export default class Paste extends Module {
 
         content.innerHTML = text;
 
-        const event = this.composePasteEvent('tag', {
+        let event = this.composePasteEvent('tag', {
           data: content,
         });
+        let tool = initialBlock;
+
+        if (text.length < this.config.pattern_processing_max_length) {
+          const blockData = this.processPattern(content.textContent);
+          if (blockData) {
+            event = blockData.event;
+            tool = blockData.tool;
+          }
+        }
 
         return {content, tool, isBlock: false, event};
       });
@@ -604,8 +608,8 @@ export default class Paste extends Module {
 
     const currentBlockIsInitial = BlockManager.currentBlock && Tools.isInitial(BlockManager.currentBlock.tool);
 
-    if (currentBlockIsInitial && content.textContent.length < Paste.PATTERN_PROCESSING_MAX_LENGTH) {
-      const blockData = await this.processPattern(content.textContent);
+    if (currentBlockIsInitial && content.textContent.length < this.config.pattern_processing_max_length) {
+      const blockData = this.processPattern(content.textContent);
 
       if (blockData) {
         let insertedBlock;
@@ -637,8 +641,8 @@ export default class Paste extends Module {
    * @param {string} text
    * @returns Promise<{data: BlockToolData, tool: string}>
    */
-  private async processPattern(text: string): Promise<{event: PasteEvent, tool: string}> {
-    const pattern =  this.toolsPatterns.find((substitute) => {
+  private processPattern(text: string): { event: PasteEvent; tool: string } {
+    const pattern = this.toolsPatterns.find(substitute => {
       const execResult = substitute.pattern.exec(text);
 
       if (!execResult) {
