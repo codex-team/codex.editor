@@ -173,6 +173,7 @@ export default class BlockEvents extends Module {
     if (!SelectionUtils.isCollapsed) {
       this.Editor.BlockSelection.clearSelection(event);
     }
+
     this.Editor.CrossBlockSelection.watchSelection(event);
   }
 
