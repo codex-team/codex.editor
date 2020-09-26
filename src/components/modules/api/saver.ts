@@ -14,14 +14,16 @@ export default class SaverAPI extends Module {
    */
   public get methods(): Saver {
     return {
-      save: (): Promise<OutputData> => this.save(),
+      save: (sanitizeDisable = false): Promise<OutputData> => this.save(sanitizeDisable),
     };
   }
 
   /**
    * Return Editor's data
+   *
+   * @param {boolean} sanitizeDisable true to disable blocks sanitizing on save
    */
-  public save(): Promise<OutputData> {
-    return this.Editor.Saver.save();
+  public save(sanitizeDisable: boolean): Promise<OutputData> {
+    return this.Editor.Saver.save(sanitizeDisable);
   }
 }
