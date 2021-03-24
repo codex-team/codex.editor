@@ -1,5 +1,9 @@
 # Changelog
 
+### 2.19.4
+
+- `Improvements` - Vertical caret moving with UP or DOWN key [#857](https://github.com/codex-team/editor.js/issues/857).
+
 ### 2.19.3
 
 - `Fix` — Ignore error raised by Shortcut module

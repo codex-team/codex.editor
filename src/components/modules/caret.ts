@@ -16,6 +16,26 @@ import $ from '../dom';
 import * as _ from '../utils';
 
 /**
+ * The result of detection an next or previous line
+ */
+interface Position {
+  /**
+   * Detected Block
+   */
+  block: Block;
+
+  /**
+   * Detected Tool's input
+   */
+  input?: HTMLElement;
+
+  /**
+   * The detected offset of the block or input
+   */
+  offset: number;
+}
+
+/**
  * @typedef {Caret} Caret
  */
 export default class Caret extends Module {
@@ -244,16 +264,12 @@ export default class Caret extends Module {
       return;
     }
 
-    const nodeToSet = $.getDeepestNode(element, position === this.positions.END);
-    const contentLength = $.getContentLength(nodeToSet);
-
     switch (true) {
       case position === this.positions.START:
         offset = 0;
         break;
       case position === this.positions.END:
-      case offset > contentLength:
-        offset = contentLength;
+        offset = $.getContentLength(element);
         break;
     }
 
@@ -261,7 +277,7 @@ export default class Caret extends Module {
      * @todo try to fix via Promises or use querySelectorAll to not to use timeout
      */
     _.delay(() => {
-      this.set(nodeToSet as HTMLElement, offset);
+      this.set(element, offset);
     }, 20)();
 
     BlockManager.setCurrentBlockByChildNode(block.holder);
@@ -278,20 +294,19 @@ export default class Caret extends Module {
    */
   public setToInput(input: HTMLElement, position: string = this.positions.DEFAULT, offset = 0): void {
     const { currentBlock } = this.Editor.BlockManager;
-    const nodeToSet = $.getDeepestNode(input);
 
     switch (position) {
       case this.positions.START:
-        this.set(nodeToSet as HTMLElement, 0);
+        this.set(input, 0);
         break;
 
       case this.positions.END:
-        this.set(nodeToSet as HTMLElement, $.getContentLength(nodeToSet));
+        this.set(input, $.getContentLength(input));
         break;
 
       default:
         if (offset) {
-          this.set(nodeToSet as HTMLElement, offset);
+          this.set(input, offset);
         }
     }
 
@@ -302,10 +317,32 @@ export default class Caret extends Module {
    * Creates Document Range and sets caret to the element with offset
    *
    * @param {HTMLElement} element - target node.
-   * @param {number} offset - offset
+   * @param {number} offset - offset.
    */
   public set(element: HTMLElement, offset = 0): void {
-    const { top, bottom } = Selection.setCursor(element, offset);
+    const treeWalker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+
+    let detectedNode = treeWalker.firstChild();
+    let detectedOffset = offset;
+
+    while (detectedNode) {
+      if (!(detectedNode instanceof Text)) {
+        throw new Error('Unexpected node type');
+      }
+
+      if (detectedNode.length >= detectedOffset) {
+        break;
+      }
+
+      detectedOffset -= detectedNode.length;
+      detectedNode = treeWalker.nextNode();
+    }
+
+    if (!detectedNode) {
+      throw new Error('Out of range');
+    }
+
+    const { top, bottom } = Selection.setCursor(detectedNode as HTMLElement, detectedOffset);
 
     /** If new cursor position is not visible, scroll to it */
     const { innerHeight } = window;
@@ -388,44 +425,22 @@ export default class Caret extends Module {
    * Before moving caret, we should check if caret position is at the end of Plugins node
    * Using {@link Dom#getDeepestNode} to get a last node and match with current selection
    *
+   * @param {'down' | 'right'} direction - the direction of navigation
+   *
    * @returns {boolean}
    */
-  public navigateNext(): boolean {
-    const { BlockManager, Tools } = this.Editor;
-    const { currentBlock, nextContentfulBlock } = BlockManager;
-    const { nextInput } = currentBlock;
-    const isAtEnd = this.isAtEnd;
+  public navigateNext(direction: 'down' | 'right'): boolean {
+    const shouldNavigateToNext = this.isAtEnd || (direction === 'down' && !this.isLineExisted('next'));
+    const next = shouldNavigateToNext && this.detectNextLinePosition();
 
-    let nextBlock = nextContentfulBlock;
+    if (next) {
+      const offset = direction === 'down' ? next.offset : 0;
 
-    if (!nextBlock && !nextInput) {
-      /**
-       * This code allows to exit from the last non-initial tool:
-       * https://github.com/codex-team/editor.js/issues/1103
-       */
-
-      /**
-       * 1. If there is a last block and it is default, do nothing
-       * 2. If there is a last block and it is non-default --> and caret not at the end <--, do nothing
-       *    (https://github.com/codex-team/editor.js/issues/1414)
-       */
-      if (Tools.isDefault(currentBlock.tool) || !isAtEnd) {
-        return false;
-      }
-
-      /**
-       * If there is no nextBlock, but currentBlock is not default,
-       * insert new default block at the end and navigate to it
-       */
-      nextBlock = BlockManager.insertAtEnd();
-    }
-
-    if (isAtEnd) {
       /** If next Tool`s input exists, focus on it. Otherwise set caret to the next Block */
-      if (!nextInput) {
-        this.setToBlock(nextBlock, this.positions.START);
+      if (next.input) {
+        this.setToInput(next.input, this.positions.DEFAULT, offset);
       } else {
-        this.setToInput(nextInput, this.positions.START);
+        this.setToBlock(next.block, this.positions.DEFAULT, offset);
       }
 
       return true;
@@ -439,27 +454,22 @@ export default class Caret extends Module {
    * Before moving caret, we should check if caret position is start of the Plugins node
    * Using {@link Dom#getDeepestNode} to get a last node and match with current selection
    *
+   * @param {'left' | 'up'} direction - the direction of navigation
+   *
    * @returns {boolean}
    */
-  public navigatePrevious(): boolean {
-    const { currentBlock, previousContentfulBlock } = this.Editor.BlockManager;
+  public navigatePrevious(direction: 'left' | 'up'): boolean {
+    const shouldNavigateToPrevious = this.isAtStart || (direction === 'up' && !this.isLineExisted('previous'));
+    const previous = shouldNavigateToPrevious && this.detectPreviousLinePosition();
 
-    if (!currentBlock) {
-      return false;
-    }
+    if (previous) {
+      const position = direction === 'up' ? this.positions.DEFAULT : this.positions.END;
 
-    const { previousInput } = currentBlock;
-
-    if (!previousContentfulBlock && !previousInput) {
-      return false;
-    }
-
-    if (this.isAtStart) {
       /** If previous Tool`s input exists, focus on it. Otherwise set caret to the previous Block */
-      if (!previousInput) {
-        this.setToBlock(previousContentfulBlock, this.positions.END);
+      if (previous.input) {
+        this.setToInput(previous.input, position, previous.offset);
       } else {
-        this.setToInput(previousInput, this.positions.END);
+        this.setToBlock(previous.block, position, previous.offset);
       }
 
       return true;
@@ -549,6 +559,117 @@ export default class Caret extends Module {
   }
 
   /**
+   * Detect an next line position from the caret position
+   */
+  private detectNextLinePosition(): Position | false {
+    const { BlockManager, Tools } = this.Editor;
+
+    const nextInput = BlockManager.currentBlock.nextInput;
+    let nextBlock = BlockManager.nextContentfulBlock;
+
+    if (!nextBlock && !nextInput) {
+      /**
+       * If there is a last block and it is default, do nothing
+       * This code allows to exit from the last non-initial tool:
+       * https://github.com/codex-team/editor.js/issues/1103
+       */
+      if (Tools.isDefault(BlockManager.currentBlock.tool)) {
+        return false;
+      }
+
+      /**
+       * If there is no nextBlock, but currentBlock is not default,
+       * insert new default block at the end and navigate to it
+       */
+      nextBlock = BlockManager.insertAtEnd();
+    }
+
+    return this.detectPosition('next', nextBlock, nextInput);
+  }
+
+  /**
+   * Detect a previous line position from the caret position
+   */
+  private detectPreviousLinePosition(): Position | false {
+    const { BlockManager } = this.Editor;
+
+    const previousInput = BlockManager.currentBlock.previousInput;
+    const previousBlock = BlockManager.previousContentfulBlock;
+
+    if (!previousBlock && !previousInput) {
+      return false;
+    }
+
+    return this.detectPosition('previous', previousBlock, previousInput);
+  }
+
+  /**
+   * Detect an next or previous line position from the caret position
+   *
+   * @param {'next' | 'previous'} direction - the direction of detection
+   * @param {Block} block - next or previous Block
+   * @param {HTMLElement | undefined} input - next or previous Tool's input
+   */
+  private detectPosition(direction: 'next' | 'previous', block: Block, input?: HTMLElement): Position {
+    const caretBoundingClientRect = Selection.get().getRangeAt(0)
+      .getBoundingClientRect();
+
+    const range = new Range();
+    const root = input ?? block.firstInput;
+
+    let offset = direction === 'next' ? 0 : root.textContent.length - 1;
+    let previousBoundingClientRect: DOMRect | undefined;
+
+    let position = {
+      block,
+      input,
+      offset: direction === 'next' ? root.textContent.length : 0,
+    };
+
+    /**
+     * Detect the nearest offset by horizontal position
+     */
+    this.walkTextNodeChars(root, direction, (textNode, index) => {
+      range.setStart(textNode, index);
+      range.setEnd(textNode, index + 1);
+
+      const currentBoundingClientRect = range.getBoundingClientRect();
+
+      if (previousBoundingClientRect) {
+        const caretX = caretBoundingClientRect.x + (direction === 'previous' ? caretBoundingClientRect.width : 0);
+        const currentX = currentBoundingClientRect.x + (direction === 'previous' ? currentBoundingClientRect.width : 0);
+        const previousX = previousBoundingClientRect.x + (direction === 'previous' ? previousBoundingClientRect.width : 0);
+
+        if (Math.abs(caretX - previousX) < Math.abs(caretX - currentX)) {
+          let detectedOffset = offset + (direction === 'next' ? -1 : 1);
+
+          /**
+           * Set the caret to the right side of detected offset
+           */
+          if (direction === 'previous' && currentBoundingClientRect.y >= previousBoundingClientRect.y) {
+            detectedOffset++;
+          }
+
+          position = {
+            block,
+            input,
+            offset: detectedOffset,
+          };
+
+          return true;
+        }
+      }
+
+      direction === 'next' ? offset++ : offset--;
+      previousBoundingClientRect = currentBoundingClientRect;
+
+      return false;
+    });
+
+    return position;
+  }
+
+  /**
    * Get all first-level (first child of [contenteditabel]) siblings from passed node
    * Then you can check it for emptiness
    *
@@ -590,5 +711,80 @@ export default class Caret extends Module {
     }
 
     return siblings;
+  }
+
+  /**
+   * Judge if next or previous line is existed
+   *
+   * @param {'next' | 'previous'} direction - the direction of searching
+   */
+  private isLineExisted(direction: 'next' | 'previous'): boolean {
+    const { BlockManager } = this.Editor;
+    const range = new Range();
+
+    const caretBoundingClientRect = Selection.get().getRangeAt(0)
+      .getBoundingClientRect();
+
+    const isBroken = this.walkTextNodeChars(BlockManager.currentBlock.currentInput, direction, (textNode, index) => {
+      range.setStart(textNode, index);
+      range.setEnd(textNode, index + 1);
+
+      const boundingClientRect = range.getBoundingClientRect();
+
+      /**
+       * Search an next line by finding a character below the caret.
+       */
+      if (direction === 'next' && caretBoundingClientRect.y < boundingClientRect.y) {
+        return true;
+      }
+
+      /**
+       * Search a previous line by finding a character above the caret.
+       */
+      if (direction === 'previous' && boundingClientRect.y < caretBoundingClientRect.y) {
+        return true;
+      }
+
+      return false;
+    });
+
+    return isBroken;
+  }
+
+  /**
+   * Walk the characters in text nodes, and execute callback for each character
+   *
+   * @param {Node} root - The root of TreeWalker
+   * @param {'next' | 'previous'} direction - the direction of walking
+   * @param {boolean} callback - Function to execute on each characters. returns that walking should be broken.
+   *
+   * @returns {boolean} - Is walking broken.
+   */
+  private walkTextNodeChars(root: Node, direction: 'next' | 'previous', callback: (textNode: Text, index: number) => boolean): boolean {
+    const treeWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+
+    let node = direction === 'next' ? treeWalker.firstChild() : treeWalker.lastChild();
+
+    while (node) {
+      if (!(node instanceof Text)) {
+        throw new Error('Unexpected node type');
+      }
+
+      let index = direction === 'next' ? 0 : node.length - 1;
+
+      while (direction === 'next' ? index < node.length : index >= 0) {
+        const shouldBreak = callback(node, index);
+
+        if (shouldBreak) {
+          return true;
+        }
+
+        direction === 'next' ? index++ : index--;
+      }
+
+      node = direction === 'next' ? treeWalker.nextNode() : treeWalker.previousNode();
+    }
+
+    return false;
   }
 }

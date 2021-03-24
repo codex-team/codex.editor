@@ -363,7 +363,7 @@ export default class BlockEvents extends Module {
         return;
       }
 
-      if (Caret.navigatePrevious()) {
+      if (Caret.navigatePrevious('left')) {
         Toolbar.close();
       }
 
@@ -403,16 +403,17 @@ export default class BlockEvents extends Module {
     this.Editor.BlockManager.clearFocused();
     this.Editor.Toolbar.close();
 
+    const direction = event.keyCode === _.keyCodes.DOWN ? 'down' : 'right';
     const shouldEnableCBS = this.Editor.Caret.isAtEnd || this.Editor.BlockSelection.anyBlockSelected;
 
-    if (event.shiftKey && event.keyCode === _.keyCodes.DOWN && shouldEnableCBS) {
+    if (event.shiftKey && direction === 'down' && shouldEnableCBS) {
       this.Editor.CrossBlockSelection.toggleBlockSelectedState();
 
       return;
     }
 
-    const navigateNext = event.keyCode === _.keyCodes.DOWN || (event.keyCode === _.keyCodes.RIGHT && !this.isRtl);
-    const isNavigated = navigateNext ? this.Editor.Caret.navigateNext() : this.Editor.Caret.navigatePrevious();
+    const navigateNext = direction === 'down' || !this.isRtl;
+    const isNavigated = navigateNext ? this.Editor.Caret.navigateNext(direction) : this.Editor.Caret.navigatePrevious('left');
 
     if (isNavigated) {
       /**
@@ -461,16 +462,17 @@ export default class BlockEvents extends Module {
     this.Editor.BlockManager.clearFocused();
     this.Editor.Toolbar.close();
 
+    const direction = event.keyCode === _.keyCodes.UP ? 'up' : 'left';
     const shouldEnableCBS = this.Editor.Caret.isAtStart || this.Editor.BlockSelection.anyBlockSelected;
 
-    if (event.shiftKey && event.keyCode === _.keyCodes.UP && shouldEnableCBS) {
+    if (event.shiftKey && direction === 'up' && shouldEnableCBS) {
       this.Editor.CrossBlockSelection.toggleBlockSelectedState(false);
 
       return;
     }
 
-    const navigatePrevious = event.keyCode === _.keyCodes.UP || (event.keyCode === _.keyCodes.LEFT && !this.isRtl);
-    const isNavigated = navigatePrevious ? this.Editor.Caret.navigatePrevious() : this.Editor.Caret.navigateNext();
+    const navigatePrevious = direction === 'up' || !this.isRtl;
+    const isNavigated = navigatePrevious ? this.Editor.Caret.navigatePrevious(direction) : this.Editor.Caret.navigateNext('right');
 
     if (isNavigated) {
       /**
