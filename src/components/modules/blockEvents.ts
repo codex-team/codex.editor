@@ -5,6 +5,7 @@ import Module from '../__module';
 import * as _ from '../utils';
 import SelectionUtils from '../selection';
 import Flipper from '../flipper';
+import Block from '../block';
 
 /**
  *
@@ -27,6 +28,10 @@ export default class BlockEvents extends Module {
     switch (event.keyCode) {
       case _.keyCodes.BACKSPACE:
         this.backspace(event);
+        break;
+
+      case _.keyCodes.DELETE:
+        this.deletePressed(event);
         break;
 
       case _.keyCodes.ENTER:
@@ -337,17 +342,92 @@ export default class BlockEvents extends Module {
       /**
        * Merge Blocks
        */
-      this.mergeBlocks();
+      this.mergeBlocks(BlockManager.previousBlock, BlockManager.currentBlock);
     }
   }
 
   /**
-   * Merge current and previous Blocks if they have the same type
+   * Handle delete keydown on Block
+   *
+   * @param {KeyboardEvent} event - keydown
    */
-  private mergeBlocks(): void {
+  private deletePressed(event: KeyboardEvent): void {
+    const { BlockManager, BlockSelection, Caret } = this.Editor;
+    const currentBlock = BlockManager.currentBlock;
+    const tool = currentBlock.tool;
+
+    /**
+     * Check if Block should be removed by current Delete keydown
+     */
+    if (currentBlock.selected || (currentBlock.isEmpty && currentBlock.currentInput === currentBlock.lastInput)) {
+      event.preventDefault();
+
+      const index = BlockManager.currentBlockIndex;
+
+      if (BlockManager.nextBlock && BlockManager.nextBlock.inputs.length === 0) {
+        /** If next block doesn't contain inputs, remove it */
+        BlockManager.removeBlock(index + 1);
+      } else {
+        /** If block is empty, just remove it */
+        BlockManager.removeBlock();
+      }
+
+      // The removal placed the caret to the previous block, try to put it to the next block (if not the last)
+      if (BlockManager.nextBlock) {
+        Caret.setToBlock(
+          BlockManager.nextBlock,
+          Caret.positions.START
+        );
+      } else {
+        Caret.setToBlock(
+          BlockManager.currentBlock,
+          Caret.positions.END
+        );
+      }
+
+      /** Close Toolbar */
+      this.Editor.Toolbar.close();
+
+      /** Clear selection */
+      BlockSelection.clearSelection(event);
+
+      return;
+    }
+
+    /**
+     * Don't handle Delete when Tool sets enableLineBreaks to true.
+     * Uses for Tools like <code> where line breaks should be handled by default behaviour.
+     *
+     * But if caret is at end of the block, we allow to remove it by delete
+     */
+    if (tool.isLineBreaksEnabled && !Caret.isAtEnd) {
+      return;
+    }
+
+    const isLastBlock = BlockManager.currentBlockIndex === BlockManager.blocks.length - 1;
+    const canMergeBlocks = Caret.isAtEnd &&
+      SelectionUtils.isCollapsed &&
+      currentBlock.currentInput === currentBlock.lastInput &&
+      !isLastBlock;
+
+    if (canMergeBlocks) {
+      /**
+       * preventing browser default behaviour
+       */
+      event.preventDefault();
+
+      /**
+       * Merge Blocks
+       */
+      this.mergeBlocks(BlockManager.currentBlock, BlockManager.nextBlock);
+    }
+  }
+
+  /**
+   * Merge blockToMerge into targetBlock if they have the same type
+   */
+  private mergeBlocks(targetBlock: Block, blockToMerge: Block): void {
     const { BlockManager, Caret, Toolbar } = this.Editor;
-    const targetBlock = BlockManager.previousBlock;
-    const blockToMerge = BlockManager.currentBlock;
 
     /**
      * Blocks that can be merged:
@@ -357,11 +437,20 @@ export default class BlockEvents extends Module {
      * other case will handle as usual ARROW LEFT behaviour
      */
     if (blockToMerge.name !== targetBlock.name || !targetBlock.mergeable) {
-      /** If target Block doesn't contain inputs or empty, remove it */
+      /** If target Block doesn't contain inputs or empty, remove it. This means the user pressed backspace on the blockToMerge */
       if (targetBlock.inputs.length === 0 || targetBlock.isEmpty) {
         BlockManager.removeBlock(BlockManager.currentBlockIndex - 1);
 
         Caret.setToBlock(BlockManager.currentBlock);
+        Toolbar.close();
+
+        return;
+      }
+
+      /** If blockToMerge doesn't contain input or empty, remove it. This means the user pressed delete on the targetBlock */
+      if (blockToMerge.inputs.length === 0 || targetBlock.isEmpty) {
+        BlockManager.removeBlock(BlockManager.currentBlockIndex + 1);
+
         Toolbar.close();
 
         return;
