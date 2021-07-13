@@ -19,6 +19,7 @@ import BlockTune from '../tools/tune';
 import { BlockTuneData } from '../../../types/block-tunes/block-tune-data';
 import ToolsCollection from '../tools/collection';
 import EventsDispatcher from '../utils/events';
+import SelectionObserver from '../utils/selectionObserver';
 
 /**
  * Interface describes Block class constructor argument
@@ -448,8 +449,21 @@ export default class Block extends EventsDispatcher<BlockEvents> {
   public set selected(state: boolean) {
     if (state) {
       this.holder.classList.add(Block.CSS.selected);
+
+      const range = SelectionUtils.range;
+      const fakeCursor = $.make('span', 'ce-block__fake-cursor');
+
+      if (range && this.holder.contains(range.startContainer)) {
+        range.collapse();
+        range.insertNode(fakeCursor);
+      }
+
     } else {
       this.holder.classList.remove(Block.CSS.selected);
+
+      const fakeCursor = $.find(this.holder, '.ce-block__fake-cursor');
+
+      fakeCursor && fakeCursor.remove();
     }
   }
 
@@ -630,7 +644,7 @@ export default class Block extends EventsDispatcher<BlockEvents> {
     const defaultTunesElement = document.createDocumentFragment();
 
     this.tunesInstances.forEach((tune) => {
-      $.append(tunesElement, tune.render());
+      $.append(tunesElement, tune.render(SelectionObserver.getSelectedRange()));
     });
     this.defaultTunesInstances.forEach((tune) => {
       $.append(defaultTunesElement, tune.render());
